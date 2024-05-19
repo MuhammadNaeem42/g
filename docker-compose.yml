@@ -1,0 +1,118 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:latest
+    container_name: postgres_container
+    platform: linux/amd64
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  selenium_hub:
+    image: selenium/hub:latest
+    container_name: selenium_hub
+    platform: linux/amd64
+    ports:
+      - "4444:4444"
+    environment:
+      GRID_MAX_SESSION: 16
+      GRID_BROWSER_TIMEOUT: 300
+
+  chrome:
+    image: selenium/node-chrome:latest
+    platform: linux/amd64
+    depends_on:
+      - selenium_hub
+    environment:
+      HUB_HOST: selenium_hub
+      HUB_PORT: 4444
+      SE_EVENT_BUS_HOST: selenium_hub
+      SE_EVENT_BUS_PUBLISH_PORT: 4442
+      SE_EVENT_BUS_SUBSCRIBE_PORT: 4443
+    container_name: chrome
+    volumes:
+      - /dev/shm:/dev/shm
+
+  setup_db:
+    build:
+      context: .
+      dockerfile: Dockerfile.setup_db
+    container_name: setup_db_container
+    platform: linux/amd64
+    environment:
+      - DB_NAME=${DB_NAME}
+      - DB_USERNAME=${DB_USERNAME}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+    depends_on:
+      - postgres
+
+  get_odds:
+    build:
+      context: .
+      dockerfile: Dockerfile.get_odds
+    container_name: get_odds_container
+    platform: linux/amd64
+    environment:
+      - PROXY_USER=${PROXY_USER}
+      - PROXY_PASS=${PROXY_PASS}
+      - DB_NAME=${DB_NAME}
+      - DB_USERNAME=${DB_USERNAME}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+    depends_on:
+      - postgres
+      - setup_db
+      - selenium_hub
+      - chrome
+    volumes:
+      - shared_data:/app
+      - /dev/shm:/dev/shm
+    entrypoint: ["python3", "/app/get_odds.py"]
+
+  write_to_postgre:
+    build:
+      context: .
+      dockerfile: Dockerfile.write_to_postgre
+    container_name: write_to_postgre_container
+    platform: linux/amd64
+    environment:
+      - DB_NAME=${DB_NAME}
+      - DB_USERNAME=${DB_USERNAME}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+    depends_on:
+      - get_odds
+      - postgres
+    volumes:
+      - shared_data:/app
+    entrypoint: ["./wait-for-it.sh", "get_odds_container:4444", "--", "python3", "write_to_postgre.py"]
+
+  send_alert:
+    build:
+      context: .
+      dockerfile: Dockerfile.send_alert
+    container_name: send_alert_container
+    platform: linux/amd64
+    environment:
+      - DB_NAME=${DB_NAME}
+      - DB_USERNAME=${DB_USERNAME}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+    depends_on:
+      - write_to_postgre
+      - postgres
+
+volumes:
+  postgres_data:
+  shared_data:

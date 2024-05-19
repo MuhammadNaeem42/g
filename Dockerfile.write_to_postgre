@@ -1,0 +1,23 @@
+# Use an official Python runtime as a parent image
+FROM python:3.9
+
+# Set the working directory in the container
+WORKDIR /app
+
+# Copy the current directory contents into the container at /app
+COPY . /app
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Make port 80 available to the world outside this container
+EXPOSE 80
+
+# Ensure wait-for-it.sh is executable
+RUN chmod +x /app/wait-for-it.sh
+
+# Define environment variable
+ENV NAME World
+
+# Run write_to_postgre.py when the container launches
+CMD ["./wait-for-it.sh", "get_odds_container:80", "--", "python", "write_to_postgre.py"]
